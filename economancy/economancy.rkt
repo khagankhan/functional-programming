@@ -132,7 +132,7 @@
 
 (define (generate-attacking-move state)
   (let* ((current-player (list-ref (game-state-players state) (game-state-player state)))
-         (actionable-cards (filter (lambda (c) (and (= (card-uses c) 0) 
+         (actionable-cards (filter (λ (c) (and (= (card-uses c) 0) 
                                                     (should-attack? (card-name c))
                                                     (not (equal? (card-name c) "Sorcerer's Stipend")))) ;; Needed to be improved or no need this line at all
                                    (player-cards current-player)))
@@ -151,7 +151,7 @@
 
 ;; increment each player's coins by 1 for Sorcerer's Stipend
 (define (apply-sorcerers-stipend players)
-  (map (lambda (p) (player (+ (player-coins p) 1)
+  (map (λ (p) (player (+ (player-coins p) 1)
                            (player-buys p)
                            (player-cards p)))
        players))
