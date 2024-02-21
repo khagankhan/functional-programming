@@ -20,6 +20,7 @@
 ;; Debug Print functions:
 
 #|
+
 (define (print-player-state player)
   (printf "Player Coins: ~a, Buys: ~a, Cards: ~a\n"
           (player-coins player)
@@ -30,6 +31,7 @@
   (printf "Day: ~a, Phase: ~a\n" (game-state-day state) (hash-ref (game-state-phase state) 'name))
   (for-each print-player-state (game-state-players state))
   (printf "Shop Inventory: ~a\n" (game-state-shop state)))
+
 |#
 
 ;; Parse a player from JSON
@@ -51,11 +53,10 @@
     [(string=? (hash-ref json-phase 'name) "investing") json-phase]
     [(string=? (hash-ref json-phase 'name) "attacking") json-phase]
     [(string=? (hash-ref json-phase 'name) "buy") json-phase]
-    [(string=? (hash-ref json-phase 'name) "end" (exit)) json-phase] ;; exit gracefully when done (Checked with the last json)
-    [else (error "[-] Error: Unknown phase or invalid JSON")]))
+    [(string=? (hash-ref json-phase 'name) "end") json-phase]
+    [else (error "[-] Error: Unknown phase - check JSON")]))
 
-;; I thought changing symbol->string can be a side effect. So for buy phase I keep them as symbol from the beginning.
-
+;; I thought changing symbol->string can be a side effect. So for buy phase I keep them as symbol from the beginning. (I also used symbol->string in some functions. Gonna keep one after feedback)
 (define (card-cost card-name)
   ;; (printf "card-cost called with: ~a\n" card-name) -> Debug
   (let ((cost (cond
@@ -113,7 +114,7 @@
 
 ;; Simple logic to decide if a card should attack
 (define (should-attack? card-name)
-  (> (card-attack card-name) 2)) ;; this can be adjusted I choose 2 for now
+  (> (card-attack card-name) 1)) ;; this can be adjusted I choose 1 for now
 
 ;; Choose the best card to attack with based on attack value
 ;; Find the best card to attack with
@@ -134,7 +135,7 @@
   (let* ((current-player (list-ref (game-state-players state) (game-state-player state)))
          (actionable-cards (filter (λ (c) (and (= (card-uses c) 0) 
                                                     (should-attack? (card-name c))
-                                                    (not (equal? (card-name c) "Sorcerer's Stipend")))) ;; Needed to be improved or no need this line at all
+                                                    (not (equal? (card-name c) "Sorcerer's Stipend")))) ;; Needed to be improved or no need this line at all?
                                    (player-cards current-player)))
          (best-card (best-attack-card actionable-cards)))
     (if best-card
@@ -150,13 +151,15 @@
   (loop lst 0))
 
 ;; increment each player's coins by 1 for Sorcerer's Stipend
+;; Initially I thought we should update it. Then I got "cannot afford" I realized I was increasing additional +1 coin each time.
 (define (apply-sorcerers-stipend players)
-  (map (λ (p) (player (+ (player-coins p) 1)
+  (map (λ (p) (player (+ (player-coins p) 0) ;; it used to be 1. Then I changed it to 0
                            (player-buys p)
                            (player-cards p)))
        players))
 
-;; Function to update the game state for a new day, including Sorcerer's Stipend effect
+;; Function to update the game state for a new day, including Sorcerer's Stipend effect.
+;; Of that, I have update-game-state-for-new-day function. I did not touch it. But I am gonna remove it down the road
 (define (update-game-state-for-new-day state)
   (game-state (game-state-day state)
               (game-state-phase state)
@@ -166,47 +169,62 @@
 
 
 (define (generate-move state)
-  ;; Debug Game States
+  ;; Debug prints
   ;; (printf "Before Move:\n")
   ;; (print-game-state state)
-  (let* ((updated-state (if (or (equal? (hash-ref (game-state-phase state) 'name) "investing") (equal? (hash-ref (game-state-phase state) 'name) "buy")) ;; let* can be used immediately
+  (let* ((updated-state (if (or (equal? (hash-ref (game-state-phase state) 'name) "investing") (equal? (hash-ref (game-state-phase state) 'name) "buy") (equal? (hash-ref (game-state-phase state) 'name) "attacking")) ;; let* can be used immediately
                             (update-game-state-for-new-day state)
                             state))
          (phase (game-state-phase updated-state))
-         ;; Store the result of move generation for debugging or further processing
+         ;; Store the result of move generation for debugging or further processing if needed?
          (move-result (cond
                         [(string=? (hash-ref phase 'name) "investing") (generate-investing-move updated-state)]
                         [(string=? (hash-ref phase 'name) "attacking") (generate-attacking-move updated-state)]
                         [(string=? (hash-ref phase 'name) "buy") (generate-buying-move updated-state)]
                         [(string=? (hash-ref phase 'name) "end") (exit 0)] ; Handle end phase
-                        [else (error "Unknown phase")])))
+                        [else (error "[-] Error: Unknown phase")])))
   
-   ;; Debug Game States
+   ;; Debug prints
    ;; (printf "After Move:\n")
    ;; (print-game-state updated-state)
   move-result))
 
-;; Generates a move for the investing phase with a simple strategy
+;; Generates a move for the investing phase with dumbest strategy ever
 (define (generate-investing-move state)
   (let ((coins (player-coins (list-ref (game-state-players state) (game-state-player state)))))
-    (list (max 0 (- coins 1))))) ;; Keep 1 coin if possible then keep investing
+    (list (max 0 (- coins 2))))) ;; Keep 2 coins if possible then keep investing
 
 ;; Generates a move for the buy phase with a simple strategy
 ;; If you have more coin than 2 buy. Buy the cheapest -> Very dumb strategy keep for now
+(define (card-value-score card-name-str game-state current-player)
+  (let ((card-attack-score (card-attack card-name-str))
+        (card-defense-score (card-defense card-name-str))
+        (card-cost-value (card-cost card-name-str)))
+    (+ card-attack-score card-defense-score (- 5 card-cost-value))))
+
 (define (generate-buying-move state)
   (let* ((current-player (list-ref (game-state-players state) (game-state-player state)))
          (coins (player-coins current-player))
          (shop-list (hash->list (game-state-shop state)))
          (affordable-cards (filter (λ (card-pair)
-                                     (and (> (cdr card-pair) 2) ;; Card is available
-                                          (<= (card-cost (car card-pair)) coins))) ;; Player can buy
-                                   shop-list)))
-    (if (null? affordable-cards)
-        (list "Pass")
-        (let ((card-to-buy (car (sort affordable-cards (λ (a b) (< (card-cost (car a)) (card-cost (car b))))))))
-          (list (symbol->string (car card-to-buy)))))))
+                                     (let ((card-name (car card-pair))
+                                           (cost (card-cost card-name)))
+                                       (and (> (cdr card-pair) 0) ;; Ensure availability
+                                            (<= cost coins)))) ;; Ensure affordability
+                                   shop-list))
+         (scored-cards (map (λ (card-pair)
+                              (let* ((card-name (car card-pair))
+                                     (score (card-value-score (symbol->string card-name) state current-player))) ;; I used symbol->string. Gonna keep one after feedback
+                                (cons card-name score)))
+                            affordable-cards))
+         (sorted-cards (sort scored-cards (λ (a b) (> (cdr a) (cdr b)))))
+         (best-card (if (not (null? sorted-cards))
+                        (car sorted-cards)
+                        #f)))
+    (if (and best-card (<= (card-cost (car best-card)) coins)) ;; double checking affordability. It was because of Sorcerer;s stipend. Now it is additional overhead. Gonna remove down the road
+        (list (symbol->string (car best-card)))
+        '("Pass"))))
 
-;; I/O -> Side effect but no other choice
 (define (get-and-parse-state)
   ;; (display "Enter the game state in JSON format:\n")
   (flush-output)
